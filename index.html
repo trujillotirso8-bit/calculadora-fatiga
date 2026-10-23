@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full bg-slate-900 text-slate-100">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Calculadora de Fatiga Probabilística - Método Shigley ($n_d$)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            500: '#0284c7',
+                            600: '#0369a1',
+                            700: '#0369a1',
+                            800: '#075985',
+                            900: '#0c4a6e',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- MathJax for rendering equations -->
+    <script>
+        MathJax = {
+            tex: {
+                inlineMath: [['$', '$'], ['\\(', '\\)']],
+                displayMath: [['$$', '$$'], ['\\[', '\\]']]
+            },
+            svg: {
+                fontCache: 'global'
+            }
+        };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <!-- Chart.js for distribution plot -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="h-full flex flex-col font-sans antialiased text-slate-200 bg-slate-950 selection:bg-brand-500 selection:text-white">
+
+    <!-- Header Navigation -->
+    <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="p-2 bg-brand-600 rounded-lg text-white">
+                    <i class="fa-solid me-1 fa-calculator text-xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-lg font-bold text-slate-100 leading-tight">Shigley Fatigue Stochastics</h1>
+                    <p class="text-xs text-slate-400">Cálculo del Factor de Diseño Medio $n_d$ (Probabilístico)</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="text-xs bg-brand-900/80 text-brand-300 border border-brand-700/50 px-2.5 py-1 rounded-full font-medium">
+                    Shigley 10ª/11ª Ed.
+                </span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Container -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        <!-- Left Column: Inputs & Controls (5 Cols on large screen) -->
+        <div class="lg:col-span-5 space-y-6">
+
+            <!-- Presets / Quick Load Card -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+                <div class="flex items-center justify-between mb-3">
+                    <h2 class="text-sm font-semibold text-brand-400 flex items-center gap-2">
+                        <i class="fa-solid fa-bookmark"></i> Casos Predefinidos de Prueba
+                    </h2>
+                    <span class="text-xs text-slate-400">Validación rápida</span>
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <button onclick="loadPreset('ex6_19')" class="px-3 py-2 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg transition text-left flex flex-col justify-between">
+                        <span class="font-bold text-brand-300">Ejemplo 6-19</span>
+                        <span class="text-[10px] text-slate-400">Sut = 158 kpsi / R = 0.999</span>
+                    </button>
+                    <button onclick="loadPreset('p6_71')" class="px-3 py-2 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg transition text-left flex flex-col justify-between">
+                        <span class="font-bold text-brand-300">Problema 6-71</span>
+                        <span class="text-[10px] text-slate-400">Sut = 700 MPa / R = 0.99</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Input Form Card -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg space-y-5">
+                <div class="border-b border-slate-800 pb-3 flex justify-between items-center">
+                    <h2 class="font-semibold text-slate-100 flex items-center gap-2">
+                        <i class="fa-solid fa-sliders text-brand-500"></i> Parámetros de Entrada
+                    </h2>
+                    <!-- Unit System Selector -->
+                    <div class="flex bg-slate-800 rounded-lg p-1 border border-slate-700 text-xs font-medium">
+                        <button id="unit-kpsi" onclick="setUnits('kpsi')" class="px-2.5 py-1 rounded-md text-slate-300 transition">kpsi</button>
+                        <button id="unit-mpa" onclick="setUnits('MPa')" class="px-2.5 py-1 rounded-md bg-brand-600 text-white transition">MPa</button>
+                    </div>
+                </div>
+
+                <!-- Primary Inputs -->
+                <div class="space-y-4">
+                    <!-- Material Properties -->
+                    <div>
+                        <label class="block text-xs font-medium text-slate-300 mb-1">
+                            Resistencia Última a la Tensión Promedio $\mu_{S_{ut}}$
+                        </label>
+                        <div class="relative rounded-md shadow-sm">
+                            <input type="number" id="input-sut" step="any" value="700" oninput="calculate()" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-brand-500 pr-12">
+                            <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-xs text-slate-400 unit-label">MPa</div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-medium text-slate-300 mb-1">
+                            Resistencia de Fluencia Promedio $\mu_{S_y}$ (Opcional para chequeo)
+                        </label>
+                        <div class="relative rounded-md shadow-sm">
+                            <input type="number" id="input-sy" step="any" value="560" oninput="calculate()" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-brand-500 pr-12">
+                            <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-xs text-slate-400 unit-label">MPa</div>
+                        </div>
+                    </div>
+
+                    <!-- Load Variation -->
+                    <div>
+                        <label class="block text-xs font-medium text-slate-300 mb-1">
+                            Coeficiente de Variación de Carga/Esfuerzo $C_\sigma$ (ó $C_L$)
+                        </label>
+                        <div class="flex items-center gap-2">
+                            <input type="number" id="input-csigma" step="0.01" min="0" max="1" value="0.10" oninput="calculate()" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-brand-500">
+                            <span class="text-xs text-slate-400 font-mono">(0.10 = 10%)</span>
+                        </div>
+                    </div>
+
+                    <!-- Reliability R -->
+                    <div>
+                        <div class="flex justify-between items-center mb-1">
+                            <label class="text-xs font-medium text-slate-300">Confiabilidad Deseada ($R$)</label>
+                            <span id="reliability-val-display" class="text-xs font-mono font-bold text-brand-400">0.999 (99.9%)</span>
+                        </div>
+                        <select id="input-reliability" onchange="calculate()" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-brand-500">
+                            <option value="0.50">0.50 (50.0%) - z = 0.000</option>
+                            <option value="0.90">0.90 (90.0%) - z = 1.282</option>
+                            <option value="0.95">0.95 (95.0%) - z = 1.645</option>
+                            <option value="0.99">0.99 (99.0%) - z = 2.326</option>
+                            <option value="0.999" selected>0.999 (99.9%) - z = 3.090</option>
+                            <option value="0.9999">0.9999 (99.99%) - z = 3.719</option>
+                            <option value="custom">Personalizado...</option>
+                        </select>
+                        <div id="custom-r-container" class="mt-2 hidden">
+                            <input type="number" id="input-custom-r" step="0.0001" min="0.5" max="0.99999" value="0.999" placeholder="Ej: 0.995" oninput="calculate()" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-brand-500">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Marin Factors Mean Values (ka, kb, kc, kd) -->
+                <div class="border-t border-slate-800 pt-4 space-y-3">
+                    <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400">Factores de Marin Promedio (Medios)</h3>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-[11px] text-slate-400 mb-1">$k_a$ (Superficie)</label>
+                            <input type="number" id="input-ka" step="0.01" value="0.82" oninput="calculate()" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-brand-500">
+                        </div>
+                        <div>
+                            <label class="block text-[11px] text-slate-400 mb-1">$k_b$ (Tamaño)</label>
+                            <input type="number" id="input-kb" step="0.01" value="0.85" oninput="calculate()" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-brand-500">
+                        </div>
+                        <div>
+                            <label class="block text-[11px] text-slate-400 mb-1">$k_c$ (Carga)</label>
+                            <input type="number" id="input-kc" step="0.01" value="1.00" oninput="calculate()" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-brand-500">
+                        </div>
+                        <div>
+                            <label class="block text-[11px] text-slate-400 mb-1">$k_d$ (Temperatura)</label>
+                            <input type="number" id="input-kd" step="0.01" value="1.00" oninput="calculate()" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-brand-500">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Advanced Internal CDV Settings (Collapsible) -->
+                <div class="border-t border-slate-800 pt-3">
+                    <button type="button" onclick="toggleAdvanced()" class="w-full flex items-center justify-between text-xs font-semibold text-slate-400 hover:text-slate-200 py-1 transition">
+                        <span class="flex items-center gap-1.5"><i class="fa-solid fa-sliders-h"></i> CDVs Internos / Parámetros Avanzados</span>
+                        <i id="adv-chevron" class="fa-solid fa-chevron-down text-slate-500 transition-transform"></i>
+                    </button>
+                    
+                    <div id="advanced-panel" class="hidden mt-3 space-y-3 bg-slate-950/60 p-3 rounded-lg border border-slate-800">
+                        <p class="text-[11px] text-slate-400">Coeficientes de Variación ($C_V = \sigma / \mu$) según Shigley Tabla 6-17:</p>
+                        <div class="grid grid-cols-2 gap-2 text-xs">
+                            <div>
+                                <label class="block text-[10px] text-slate-400">$C_{S_{ut}}$ (Material)</label>
+                                <input type="number" id="input-c-sut" step="0.01" value="0.05" oninput="calculate()" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] text-slate-400">$C_{S'_e}$ (Probeta)</label>
+                                <input type="number" id="input-c-se-prime" step="0.01" value="0.08" oninput="calculate()" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] text-slate-400">$C_{ka}$ (Superficie)</label>
+                                <input type="number" id="input-c-ka" step="0.01" value="0.058" oninput="calculate()" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] text-slate-400">$C_{kb}$ (Tamaño)</label>
+                                <input type="number" id="input-c-kb" step="0.01" value="0.00" oninput="calculate()" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] text-slate-400">$C_{kc}$ (Carga)</label>
+                                <input type="number" id="input-c-kc" step="0.01" value="0.00" oninput="calculate()" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] text-slate-400">$C_{kd}$ (Temp)</label>
+                                <input type="number" id="input-c-kd" step="0.01" value="0.00" oninput="calculate()" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Right Column: Results, Theory & Visualizations (7 Cols on large screen) -->
+        <div class="lg:col-span-7 space-y-6">
+
+            <!-- Primary Metric Display -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-lg relative overflow-hidden">
+                <div class="absolute -right-6 -bottom-6 w-32 h-32 bg-brand-500/10 rounded-full blur-2xl pointer-events-none"></div>
+                
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-800 pb-4">
+                    <div>
+                        <span class="text-xs font-semibold uppercase tracking-wider text-brand-400">Factor de Diseño Medio Calculado</span>
+                        <h2 class="text-3xl font-extrabold text-white mt-1 flex items-baseline gap-2">
+                            $n_d =$ <span id="res-nd" class="text-brand-400 text-4xl font-mono">--</span>
+                        </h2>
+                    </div>
+                    <div class="bg-slate-950 border border-slate-800 rounded-lg p-3 text-right">
+                        <span class="text-[11px] text-slate-400 block">Factor de Normalización ($z_R$)</span>
+                        <span id="res-zr" class="text-lg font-mono font-bold text-slate-200">--</span>
+                    </div>
+                </div>
+
+                <!-- Secondary Key Metrics Grid -->
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 text-xs">
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800">
+                        <span class="text-slate-400 block text-[10px]">$S'_e$ (Probeta Medio)</span>
+                        <span id="res-se-prime" class="font-mono font-semibold text-slate-200">--</span>
+                    </div>
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800">
+                        <span class="text-slate-400 block text-[10px]">$S_e$ (Corregido Medio)</span>
+                        <span id="res-se" class="font-mono font-semibold text-brand-300">--</span>
+                    </div>
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800">
+                        <span class="text-slate-400 block text-[10px]">$C_S$ (CDV Resistencia)</span>
+                        <span id="res-cs" class="font-mono font-semibold text-amber-400">--</span>
+                    </div>
+                    <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800">
+                        <span class="text-slate-400 block text-[10px]">$C$ (CDV Combinado)</span>
+                        <span id="res-c-comb" class="font-mono font-semibold text-purple-400">--</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stress-Strength Interference Plot Card -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                        <i class="fa-solid fa-chart-area text-brand-500"></i> Interferencia Esfuerzo - Resistencia (Stress-Strength Interference)
+                    </h3>
+                    <span class="text-[11px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded border border-slate-700">
+                        Probabilidad de Falla $p_f = 1 - R$
+                    </span>
+                </div>
+                <div class="relative h-64 w-full">
+                    <canvas id="interferenceChart"></canvas>
+                </div>
+                <p class="text-[11px] text-slate-400 mt-2 italic text-center">
+                    Visualización conceptual de la superposición entre la curva de esfuerzo estocástico $\sigma$ y la resistencia a la fatiga $S_e$. El área solapada representa el riesgo de falla para el $n_d$ calculado.
+                </p>
+            </div>
+
+            <!-- Detailed Breakdown & Theory Accordion/Tabs -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg space-y-4">
+                <h3 class="text-sm font-semibold text-slate-200 flex items-center gap-2 border-b border-slate-800 pb-2">
+                    <i class="fa-solid fa-square-root-variable text-brand-500"></i> Fórmulas y Algoritmo Estocástico (Shigley)
+                </h3>
+
+                <div class="text-xs text-slate-300 space-y-3 leading-relaxed">
+                    <p>
+                        Para fatiga axial/flexión completamente reversible, Shigley combina la variabilidad de los factores de modificación de Marin para obtener el coeficiente de variación de resistencia $C_S$:
+                    </p>
+                    
+                    <div class="bg-slate-950 p-3 rounded-lg border border-slate-800 overflow-x-auto text-center font-mono text-[11px]">
+                        $$C_S = \sqrt{C_{S_{ut}}^2 + C_{S'_e}^2 + C_{k_a}^2 + C_{k_b}^2 + C_{k_c}^2 + C_{k_d}^2}$$
+                    </div>
+
+                    <p>
+                        Luego, la ecuación de interferencia acoplada (Ecuación de Shigley) resuelve el factor de diseño medio $n_d = \mu_S / \mu_\sigma$ exacto para cumplir con el nivel de confiabilidad $z_R$:
+                    </p>
+
+                    <div class="bg-slate-950 p-3 rounded-lg border border-slate-800 overflow-x-auto text-center font-mono text-[11px]">
+                        $$n_d = \frac{1 + \sqrt{1 - \left(1 - z_R^2 C_S^2\right)\left(1 - z_R^2 C_\sigma^2\right)}}{1 - z_R^2 C_S^2}$$
+                    </div>
+
+                    <!-- Summary Table of Variances -->
+                    <div class="pt-2">
+                        <h4 class="font-semibold text-slate-200 mb-2 text-xs">Resumen de Variaciones Internas:</h4>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left text-[11px] border-collapse">
+                                <thead>
+                                    <tr class="border-b border-slate-800 text-slate-400">
+                                        <th class="py-1">Parámetro</th>
+                                        <th class="py-1">Valor Medio ($\mu$)</th>
+                                        <th class="py-1">CDV ($C_V$)</th>
+                                        <th class="py-1">Varianza Relativa ($C_V^2$)</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-800/50 font-mono">
+                                    <tr>
+                                        <td class="py-1 font-sans text-slate-300">Resistencia $S_{ut}$</td>
+                                        <td id="tbl-sut-val">--</td>
+                                        <td id="tbl-csut-val">--</td>
+                                        <td id="tbl-csut-sq">--</td>
+                                    </tr>
+                                    <tr>
+                                        <td class="py-1 font-sans text-slate-300">Factor Superficie $k_a$</td>
+                                        <td id="tbl-ka-val">--</td>
+                                        <td id="tbl-cka-val">--</td>
+                                        <td id="tbl-cka-sq">--</td>
+                                    </tr>
+                                    <tr class="bg-slate-950/40 font-bold text-brand-300">
+                                        <td class="py-1 font-sans">Global Resistencia $S_e$</td>
+                                        <td id="tbl-se-val">--</td>
+                                        <td id="tbl-cs-val">--</td>
+                                        <td id="tbl-cs-sq">--</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-slate-800 bg-slate-900/50 py-4 mt-auto text-center text-xs text-slate-500">
+        Diseño Mecánico e Ingeniería - Implementación Estocástica de Fatiga (Shigley Cap. 6)
+    </footer>
+
+    <!-- Application Script -->
+    <script>
+        // Global State
+        let currentUnits = 'MPa';
+        let chartInstance = null;
+
+        // Standard normal Z lookup table or erf approximation
+        function getZFromReliability(R) {
+            // Approximation for inverse error function (normsinv)
+            if (R <= 0.5) return 0;
+            if (R >= 0.99999) return 4.26;
+            
+            // Known lookup values for typical Shigley problem sets
+            const known = {
+                '0.5': 0.0,
+                '0.9': 1.28155,
+                '0.95': 1.64485,
+                '0.99': 2.32635,
+                '0.999': 3.09023,
+                '0.9999': 3.71902
+            };
+            if (known[R.toString()]) return known[R.toString()];
+
+            // Abramowitz and Stegun approximation for inverse normal CDF
+            const p = 1 - R;
+            const t = Math.sqrt(-2 * Math.log(p));
+            const c0 = 2.515517, c1 = 0.802853, c2 = 0.010328;
+            const d1 = 1.432788, d2 = 0.189269, d3 = 0.001308;
+            return t - ((c2*t + c1)*t + c0) / (((d3*t + d2)*t + d1)*t + 1);
+        }
+
+        function setUnits(unit) {
+            if (currentUnits === unit) return;
+
+            const sutInput = document.getElementById('input-sut');
+            const syInput = document.getElementById('input-sy');
+            let sut = parseFloat(sutInput.value) || 0;
+            let sy = parseFloat(syInput.value) || 0;
+
+            if (unit === 'kpsi') {
+                // Convert MPa to kpsi
+                sutInput.value = (sut / 6.89476).toFixed(1);
+                syInput.value = (sy / 6.89476).toFixed(1);
+            } else {
+                // Convert kpsi to MPa
+                sutInput.value = (sut * 6.89476).toFixed(1);
+                syInput.value = (sy * 6.89476).toFixed(1);
+            }
+
+            currentUnits = unit;
+
+            // Update UI buttons
+            document.querySelectorAll('.unit-label').forEach(el => el.innerText = unit);
+            document.getElementById('unit-kpsi').className = unit === 'kpsi' 
+                ? 'px-2.5 py-1 rounded-md bg-brand-600 text-white transition' 
+                : 'px-2.5 py-1 rounded-md text-slate-300 transition';
+            document.getElementById('unit-mpa').className = unit === 'MPa' 
+                ? 'px-2.5 py-1 rounded-md bg-brand-600 text-white transition' 
+                : 'px-2.5 py-1 rounded-md text-slate-300 transition';
+
+            calculate();
+        }
+
+        function toggleAdvanced() {
+            const panel = document.getElementById('advanced-panel');
+            const chevron = document.getElementById('adv-chevron');
+            if (panel.classList.contains('hidden')) {
+                panel.classList.remove('hidden');
+                chevron.classList.add('rotate-180');
+            } else {
+                panel.classList.add('hidden');
+                chevron.classList.remove('rotate-180');
+            }
+        }
+
+        function loadPreset(presetKey) {
+            if (presetKey === 'ex6_19') {
+                // Shigley Example 6-19
+                if (currentUnits !== 'kpsi') setUnits('kpsi');
+                document.getElementById('input-sut').value = 158; // kpsi
+                document.getElementById('input-sy').value = 140;  // kpsi
+                document.getElementById('input-csigma').value = 0.10; // 10%
+                document.getElementById('input-reliability').value = '0.999';
+                document.getElementById('input-ka').value = 0.670;
+                document.getElementById('input-kb').value = 0.848;
+                document.getElementById('input-kc').value = 1.000;
+                document.getElementById('input-kd').value = 1.000;
+                document.getElementById('input-c-sut').value = 0.05;
+                document.getElementById('input-c-se-prime').value = 0.08;
+                document.getElementById('input-c-ka').value = 0.058;
+            } else if (presetKey === 'p6_71') {
+                // Shigley Problem 6-71
+                if (currentUnits !== 'MPa') setUnits('MPa');
+                document.getElementById('input-sut').value = 700; // MPa
+                document.getElementById('input-sy').value = 560; // MPa
+                document.getElementById('input-csigma').value = 0.12;
+                document.getElementById('input-reliability').value = '0.99';
+                document.getElementById('input-ka').value = 0.78;
+                document.getElementById('input-kb').value = 0.85;
+                document.getElementById('input-kc').value = 1.00;
+                document.getElementById('input-kd').value = 1.00;
+                document.getElementById('input-c-sut').value = 0.05;
+                document.getElementById('input-c-se-prime').value = 0.08;
+                document.getElementById('input-c-ka').value = 0.058;
+            }
+            calculate();
+        }
+
+        function calculate() {
+            // Fetch inputs
+            const sut = parseFloat(document.getElementById('input-sut').value) || 0;
+            const C_sigma = parseFloat(document.getElementById('input-csigma').value) || 0;
+            
+            // Reliability R & Z_R
+            const relSelect = document.getElementById('input-reliability').value;
+            const customContainer = document.getElementById('custom-r-container');
+            let R = 0.999;
+
+            if (relSelect === 'custom') {
+                customContainer.classList.remove('hidden');
+                R = parseFloat(document.getElementById('input-custom-r').value) || 0.99;
+            } else {
+                customContainer.classList.add('hidden');
+                R = parseFloat(relSelect);
+            }
+            document.getElementById('reliability-val-display').innerText = `${R} (${(R * 100).toFixed(2)}%)`;
+
+            const z_R = getZFromReliability(R);
+
+            // Marin factors
+            const ka = parseFloat(document.getElementById('input-ka').value) || 1.0;
+            const kb = parseFloat(document.getElementById('input-kb').value) || 1.0;
+            const kc = parseFloat(document.getElementById('input-kc').value) || 1.0;
+            const kd = parseFloat(document.getElementById('input-kd').value) || 1.0;
+
+            // Internal Variances (CDVs)
+            const C_Sut = parseFloat(document.getElementById('input-c-sut').value) || 0;
+            const C_Se_prime = parseFloat(document.getElementById('input-c-se-prime').value) || 0;
+            const C_ka = parseFloat(document.getElementById('input-c-ka').value) || 0;
+            const C_kb = parseFloat(document.getElementById('input-c-kb').value) || 0;
+            const C_kc = parseFloat(document.getElementById('input-c-kc').value) || 0;
+            const C_kd = parseFloat(document.getElementById('input-c-kd').value) || 0;
+
+            // 1. Calculate Endurance Limit of Specimen S'e
+            // Shigley rule: S'e = 0.5 * Sut (for Sut <= 200 kpsi / 1400 MPa)
+            const limitSut = currentUnits === 'kpsi' ? 200 : 1400;
+            const maxSePrime = currentUnits === 'kpsi' ? 100 : 700;
+            let Se_prime = sut <= limitSut ? 0.5 * sut : maxSePrime;
+
+            // 2. Corrected Endurance Limit Se (Mean)
+            let Se = ka * kb * kc * kd * Se_prime;
+
+            // 3. Combined CDV of Fatigue Strength C_S
+            let C_S_sq = Math.pow(C_Sut, 2) + Math.pow(C_Se_prime, 2) + Math.pow(C_ka, 2) + Math.pow(C_kb, 2) + Math.pow(C_kc, 2) + Math.pow(C_kd, 2);
+            let C_S = Math.sqrt(C_S_sq);
+
+            // 4. Combined CDV (C) for Interference
+            let C_comb = Math.sqrt((Math.pow(C_S, 2) + Math.pow(C_sigma, 2)) / (1 + Math.pow(C_sigma, 2)));
+
+            // 5. Stochastic Mean Design Factor nd
+            // Formula: nd = [ 1 + sqrt( 1 - (1 - z_R^2 * C_S^2)*(1 - z_R^2 * C_sigma^2) ) ] / ( 1 - z_R^2 * C_S^2 )
+            let numTerm1 = 1 - Math.pow(z_R, 2) * Math.pow(C_S, 2);
+            let numTerm2 = 1 - Math.pow(z_R, 2) * Math.pow(C_sigma, 2);
+            let rad = 1 - (numTerm1 * numTerm2);
+
+            let nd = 0;
+            if (numTerm1 > 0 && rad >= 0) {
+                nd = (1 + Math.sqrt(rad)) / numTerm1;
+            } else {
+                nd = NaN; // High risk / mathematical invalid boundary
+            }
+
+            // Update UI Outputs
+            document.getElementById('res-nd').innerText = isNaN(nd) ? 'N/A' : nd.toFixed(3);
+            document.getElementById('res-zr').innerText = z_R.toFixed(3);
+            document.getElementById('res-se-prime').innerText = `${Se_prime.toFixed(1)} ${currentUnits}`;
+            document.getElementById('res-se').innerText = `${Se.toFixed(1)} ${currentUnits}`;
+            document.getElementById('res-cs').innerText = C_S.toFixed(4);
+            document.getElementById('res-c-comb').innerText = C_comb.toFixed(4);
+
+            // Update Table
+            document.getElementById('tbl-sut-val').innerText = `${sut} ${currentUnits}`;
+            document.getElementById('tbl-csut-val').innerText = C_Sut.toFixed(3);
+            document.getElementById('tbl-csut-sq').innerText = Math.pow(C_Sut, 2).toFixed(5);
+
+            document.getElementById('tbl-ka-val').innerText = ka.toFixed(3);
+            document.getElementById('tbl-cka-val').innerText = C_ka.toFixed(3);
+            document.getElementById('tbl-cka-sq').innerText = Math.pow(C_ka, 2).toFixed(5);
+
+            document.getElementById('tbl-se-val').innerText = `${Se.toFixed(1)} ${currentUnits}`;
+            document.getElementById('tbl-cs-val').innerText = C_S.toFixed(4);
+            document.getElementById('tbl-cs-sq').innerText = Math.pow(C_S, 2).toFixed(5);
+
+            // Plot Distribution Curves
+            renderInterferenceChart(Se, C_S, nd);
+        }
+
+        // Render Gaussian Curves for Stress and Strength
+        function renderInterferenceChart(meanStrength, C_S, nd) {
+            const ctx = document.getElementById('interferenceChart').getContext('2d');
+
+            if (isNaN(nd) || nd <= 0) return;
+
+            // Mean stress
+            const meanStress = meanStrength / nd;
+            const C_sigma = parseFloat(document.getElementById('input-csigma').value) || 0.10;
+
+            const stdStrength = meanStrength * C_S;
+            const stdStress = meanStress * C_sigma;
+
+            // Generate plot data points
+            const minX = Math.max(0, meanStress - 4 * stdStress);
+            const maxX = meanStrength + 4 * stdStrength;
+            const steps = 100;
+            const stepSize = (maxX - minX) / steps;
+
+            const labels = [];
+            const stressData = [];
+            const strengthData = [];
+
+            function gaussian(x, mean, std) {
+                return (1 / (std * Math.sqrt(2 * Math.PI))) * Math.exp(-0.5 * Math.pow((x - mean) / std, 2));
+            }
+
+            for (let i = 0; i <= steps; i++) {
+                const x = minX + i * stepSize;
+                labels.push(x.toFixed(1));
+                stressData.push(gaussian(x, meanStress, stdStress));
+                strengthData.push(gaussian(x, meanStrength, stdStrength));
+            }
+
+            if (chartInstance) {
+                chartInstance.destroy();
+            }
+
+            chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: `Esfuerzo Aplicado (μ_σ = ${meanStress.toFixed(1)} ${currentUnits})`,
+                            data: stressData,
+                            borderColor: '#ef4444',
+                            backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                            fill: true,
+                            tension: 0.4,
+                            borderWidth: 2,
+                            pointRadius: 0
+                        },
+                        {
+                            label: `Resistencia Fatiga (μ_Se = ${meanStrength.toFixed(1)} ${currentUnits})`,
+                            data: strengthData,
+                            borderColor: '#0284c7',
+                            backgroundColor: 'rgba(2, 132, 199, 0.15)',
+                            fill: true,
+                            tension: 0.4,
+                            borderWidth: 2,
+                            pointRadius: 0
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            labels: {
+                                color: '#94a3b8',
+                                font: { size: 11 }
+                            }
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: 'rgba(51, 65, 85, 0.3)' },
+                            ticks: { color: '#64748b', maxTicksLimit: 8 },
+                            title: { display: true, text: `Esfuerzo / Resistencia (${currentUnits})`, color: '#94a3b8', font: { size: 11 } }
+                        },
+                        y: {
+                            display: false
+                        }
+                    }
+                }
+            });
+        }
+
+        // Initialize on load
+        window.onload = function() {
+            calculate();
+        };
+    </script>
+</body>
+</html>
